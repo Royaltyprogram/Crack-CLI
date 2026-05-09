@@ -25,3 +25,23 @@ PR 올림.
 # Agent 4: PR 심사, Merge
 PR 심사 중이라면 모든 Plan 생성을 일시중단 Merge 이후에 다시 시작. 
 (새롭게 만들어지는 Plan이 생기지 않도록 막음)
+
+# Dashboard
+현재 workflow 상태는 Markdown state를 source of truth로 두고 터미널에서 확인한다.
+
+```bash
+crack dashboard
+crack dashboard --root /path/to/repo
+```
+
+남은 commit unit을 모두 실행하는 동안 다른 터미널에서 진행률을 확인할 수 있다.
+
+```bash
+# Terminal 1
+crack run-all --plan .crack/plans/<plan>/plan.md
+
+# Terminal 2
+crack dashboard --watch
+```
+
+dashboard는 `.crack/` Markdown 파일과 git 상태를 읽기만 하며 plan, queue, log를 수정하지 않는다.
