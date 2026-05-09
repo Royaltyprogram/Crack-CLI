@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 
 import { Router } from "./router";
+import { ImplementerRunner } from "./implementer";
+import type { RunNextResult } from "./implementer";
 import { findRepoRoot, MarkdownState } from "./state";
 
 type CommandResult = {
@@ -74,6 +76,14 @@ async function run(argv: string[]): Promise<CommandResult> {
     return { status: 0, message: removed ? "clear_pr_lock: removed" : "clear_pr_lock: no lock" };
   }
 
+  if (args.command === "run-next") {
+    const result = await new ImplementerRunner(state).runNext({
+      planPath: stringFlag(args, "plan"),
+    });
+
+    return { status: result.action === "needs_work" ? 1 : 0, message: formatRunNextResult(result) };
+  }
+
   throw new Error(`Unknown command: ${args.command}`);
 }
 
@@ -132,12 +142,25 @@ function helpText(): string {
     "  init",
     "  submit <prompt> [--plan <path>] [--branch <name>] [--title <title>] [--reason <text>]",
     "  route <prompt> [--plan <path>] [--branch <name>] [--title <title>] [--reason <text>]",
+    "  run-next [--plan <path>]",
     "  set-pr-lock --branch <name> --pr-url <url> --reason <text> [--status <status>]",
     "  clear-pr-lock",
     "",
     "Global options:",
     "  --root <path>    Repository root. Defaults to the nearest parent containing .git.",
   ].join("\n");
+}
+
+function formatRunNextResult(result: RunNextResult): string {
+  if (result.action === "committed") {
+    return `committed unit ${result.unitNumber}: ${result.commitHash} ${result.message}`;
+  }
+
+  if (result.action === "complete") {
+    return `complete: ${result.message}`;
+  }
+
+  return `needs_work unit ${result.unitNumber}: ${result.reason}`;
 }
 
 if (require.main === module) {

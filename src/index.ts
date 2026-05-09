@@ -1,7 +1,43 @@
 export { Router } from "./router";
 export type { RouteAction, RouteDecision, RouteOptions } from "./router";
 export { GitCliBranchManager } from "./git";
-export type { BranchManager } from "./git";
+export {
+  GitCliCommitter,
+  changedPathsSince,
+  parseGitStatus,
+  stagedPaths,
+} from "./git";
+export type {
+  BranchManager,
+  Committer,
+  GitStatusEntry,
+  GitStatusSnapshot,
+} from "./git";
+export {
+  ImplementerRunner,
+  completedCommitUnitNumbers,
+  parseCommitUnits,
+  selectNextCommitUnit,
+} from "./implementer";
+export type {
+  CommitUnit,
+  RunNextOptions,
+  RunNextResult,
+} from "./implementer";
+export {
+  CodexImplementerAgent,
+  buildImplementationPrompt,
+  buildReviewPrompt,
+  parseCommitUnitReview,
+  parseSessionId,
+} from "./implementer-agent";
+export type {
+  CodexImplementerAgentOptions,
+  CommitUnitReview,
+  ImplementerAgent,
+  ImplementerAgentInput,
+  ImplementerAgentResult,
+} from "./implementer-agent";
 export {
   CodexPlannerAgent,
   buildPlannerPrompt,
