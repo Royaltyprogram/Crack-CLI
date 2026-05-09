@@ -43,10 +43,10 @@ async function run(argv: string[]): Promise<CommandResult> {
     return { status: 0, message: `initialized ${state.crackDir}` };
   }
 
-  if (args.command === "route") {
+  if (args.command === "route" || args.command === "submit") {
     const prompt = args.values.join(" ").trim();
     if (!prompt) {
-      throw new Error("route requires a prompt");
+      throw new Error(`${args.command} requires a prompt`);
     }
 
     const decision = await new Router(state).route(prompt, {
@@ -130,6 +130,7 @@ function helpText(): string {
     "",
     "Commands:",
     "  init",
+    "  submit <prompt> [--plan <path>] [--branch <name>] [--title <title>] [--reason <text>]",
     "  route <prompt> [--plan <path>] [--branch <name>] [--title <title>] [--reason <text>]",
     "  set-pr-lock --branch <name> --pr-url <url> --reason <text> [--status <status>]",
     "  clear-pr-lock",

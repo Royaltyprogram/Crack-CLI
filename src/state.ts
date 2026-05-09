@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { appendFile, mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 export type PlanPaths = {
@@ -7,6 +7,12 @@ export type PlanPaths = {
   plan: string;
   queue: string;
   log: string;
+};
+
+export type ActivePlan = PlanPaths & {
+  branchName: string;
+  planContent: string;
+  queueContent: string;
 };
 
 export function findRepoRoot(start = process.cwd()): string {
@@ -111,6 +117,43 @@ export class MarkdownState {
       queue: path.join(directory, "queue.md"),
       log: path.join(directory, "log.md"),
     };
+  }
+
+  async listActivePlans(): Promise<ActivePlan[]> {
+    await this.initialize();
+
+    const entries = await readdir(this.plansDir, { withFileTypes: true });
+    const plans: ActivePlan[] = [];
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) {
+        continue;
+      }
+
+      const directory = path.join(this.plansDir, entry.name);
+      const plan = path.join(directory, "plan.md");
+
+      if (!existsSync(plan)) {
+        continue;
+      }
+
+      const queue = path.join(directory, "queue.md");
+      const log = path.join(directory, "log.md");
+      const planContent = await readFile(plan, "utf8");
+      const queueContent = existsSync(queue) ? await readFile(queue, "utf8") : "";
+
+      plans.push({
+        directory,
+        plan,
+        queue,
+        log,
+        branchName: branchNameFromPlan(planContent) ?? entry.name,
+        planContent,
+        queueContent,
+      });
+    }
+
+    return plans.sort((left, right) => left.directory.localeCompare(right.directory));
   }
 
   async appendInbox(prompt: string, reason: string, receivedAt = timestamp()): Promise<string> {
@@ -252,4 +295,9 @@ function logTemplate(branchName: string, reason: string, receivedAt: string): st
     `- Reason: ${reason.trim()}`,
     "",
   ].join("\n");
+}
+
+function branchNameFromPlan(content: string): string | undefined {
+  const match = content.match(/^Branch:\s*(.+)\s*$/m);
+  return match?.[1]?.trim() || undefined;
 }
