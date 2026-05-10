@@ -13,6 +13,22 @@ A CLI built for Codex. More precisely, it is a tiny remote control for making Co
 
 Crack CLI is a tool for making these problems slightly less sad.
 
+## Quick Start
+
+0. We prepared a skill for Codex, not for you. Give Codex this prompt and let it do the chores:
+
+   ```text
+   Install Crack CLI from https://github.com/Royaltyprogram/crack-cli.git.
+   Clone the repository, run npm install, run npm run build, and link the crack binary with npm link.
+   Then install the Codex skill by copying skills/crack-cli into ${CODEX_HOME:-$HOME/.codex}/skills/crack-cli.
+   After that, verify the setup with crack --help.
+   ```
+
+1. Make sure the GitHub CLI is installed and authenticated:
+   https://docs.github.com/en/github-cli/github-cli/quickstart
+2. Make sure the Codex CLI is available, because Crack uses `codex exec` for planning, implementation, and conflict resolution.
+3. Finished. In theory. If not, congratulations: you have discovered software.
+
 ## How It Works
 
 Crack does not run a daemon, background queue, or secret little scheduler hiding under your desk. Every workflow step happens inside the CLI command you run, and the source of truth is plain Markdown under `.crack/`.
@@ -65,19 +81,3 @@ Merge only runs for a complete Plan. Crack checks `plan.md` and `log.md`; if any
 Local merge switches to the target branch, merges the Plan branch, and records the result in `log.md`. Remote merge pushes the source branch, reuses or creates a PR, and runs `gh pr merge --merge`.
 
 If a conflict appears, Crack calls a Merge agent whose job is intentionally narrow: resolve the current conflict, not redesign the feature, not rewrite the Plan, not suddenly become a product manager. If the conflict cannot be fully resolved, Crack stops with `merge_needs_work` and writes the reason to the Plan log.
-
-## How to Start
-
-0. We prepared a skill for Codex, not for you. Give Codex this prompt and let it do the chores:
-
-   ```text
-   Install Crack CLI from https://github.com/Royaltyprogram/crack-cli.git.
-   Clone the repository, run npm install, run npm run build, and link the crack binary with npm link.
-   Then install the Codex skill by copying skills/crack-cli into ${CODEX_HOME:-$HOME/.codex}/skills/crack-cli.
-   After that, verify the setup with crack --help.
-   ```
-
-1. Make sure the GitHub CLI is installed and authenticated:
-   https://docs.github.com/en/github-cli/github-cli/quickstart
-2. Make sure the Codex CLI is available, because Crack uses `codex exec` for planning, implementation, and conflict resolution.
-3. Finished. In theory. If not, congratulations: you have discovered software.
