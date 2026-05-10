@@ -175,64 +175,6 @@ class FlaskAppTest(unittest.TestCase):
             run.assert_called_once_with("merge", str(root), None)
             read_snapshot.assert_not_called()
 
-    def test_api_actions_runs_action_and_returns_refreshed_snapshot(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir).resolve()
-            snapshot = sample_snapshot(root)
-            result = ActionResult(
-                action="run-next",
-                command="crack run-next --plan .crack/plans/demo/plan.md",
-                exit_code=0,
-                stdout="ok\n",
-                stderr="",
-            )
-
-            with (
-                patch("tools.flask_branch_visualizer.app.run_action", return_value=result) as run,
-                patch("tools.flask_branch_visualizer.app.read_repository_snapshot", return_value=snapshot) as read_snapshot,
-            ):
-                app = create_app(root, max_commits=5)
-                response = app.test_client().post(
-                    "/api/actions",
-                    json={"action": "run-next", "plan_path": ".crack/plans/demo/plan.md"},
-                )
-
-            self.assertEqual(response.status_code, 200)
-            self.assertTrue(response.is_json)
-            self.assertEqual(
-                response.get_json(),
-                {
-                    "action": "run-next",
-                    "command": "crack run-next --plan .crack/plans/demo/plan.md",
-                    "exit_code": 0,
-                    "stdout": "ok\n",
-                    "stderr": "",
-                    "snapshot": snapshot,
-                },
-            )
-            run.assert_called_once_with("run-next", str(root), ".crack/plans/demo/plan.md")
-            read_snapshot.assert_called_once_with(str(root), 5)
-
-    def test_api_actions_rejects_invalid_requests_without_running_snapshot_refresh(self) -> None:
-        with tempfile.TemporaryDirectory() as temp_dir:
-            root = Path(temp_dir).resolve()
-
-            with (
-                patch(
-                    "tools.flask_branch_visualizer.app.run_action",
-                    side_effect=ActionError("Unsupported action: merge."),
-                ) as run,
-                patch("tools.flask_branch_visualizer.app.read_repository_snapshot") as read_snapshot,
-            ):
-                app = create_app(root)
-                response = app.test_client().post("/api/actions", json={"action": "merge"})
-
-            self.assertEqual(response.status_code, 400)
-            self.assertEqual(response.get_json(), {"error": "Unsupported action: merge."})
-            run.assert_called_once_with("merge", str(root), None)
-            read_snapshot.assert_not_called()
-
-
 def sample_snapshot(root: Path) -> dict[str, object]:
     return {
         "repository": {
