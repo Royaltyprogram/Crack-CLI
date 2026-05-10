@@ -75,6 +75,58 @@ crack run-all --plan .crack/plans/<plan>/plan.md --remote
 crack merge --plan .crack/plans/<plan>/plan.md
 ```
 
+## 내부 동작 모델
+
+Crack은 daemon이나 백그라운드 scheduler를 두지 않는다. 모든 상태 전환은 사용자가 실행한 CLI command 하나 안에서 끝나며, 다음에 무엇을 해야 하는지는 `.crack/` Markdown 파일과 git 상태를 다시 읽어서 결정한다.
+
+### Branch 관리
+
+새 Plan을 만들 때는 Router가 branch 이름을 결정한다. 명시적으로 `--branch`를 주지 않으면 요청 제목을 slug로 바꿔 `codex/<slug>` 형태의 branch를 만든다.
+
+Branch 준비는 단순하다.
+
+- 같은 이름의 로컬 branch가 있으면 `git switch <branch>`로 전환한다.
+- 없으면 `git switch -c <branch>`로 새로 만든다.
+- Plan directory는 branch 이름을 slug 처리한 `.crack/plans/<name>/` 아래에 만들어진다.
+- 실제 source branch는 `plan.md`의 `Branch:` 줄을 기준으로 다시 읽는다.
+
+`run-next`와 `run-all`도 commit unit을 실행하기 전에 Plan의 `Branch:` 값을 읽고 해당 branch로 전환한다. 즉, Plan 문서가 branch 선택의 source of truth다. 이 방식은 화려하진 않지만, 적어도 branch가 문서와 다른 곳으로 몰래 도망가는 일은 줄인다.
+
+### Plan scheduling
+
+Crack의 scheduling은 queue worker가 아니라 Markdown 기반의 순차 실행이다.
+
+- `submit` 또는 `route`는 요청을 즉시 구현하지 않고, 현재 상태에 따라 `inbox.md`, 기존 Plan의 `queue.md`, 또는 새 Plan으로 보낸다.
+- `.crack/pr-lock.md`가 있으면 새 Plan을 만들지 않고 모든 새 요청을 `inbox.md`에 쌓는다.
+- 사용자가 `--plan <path>`를 주면 Router 판단 없이 해당 Plan의 `queue.md`에 요청을 append한다.
+- active Plan이 있고 lock이 없으면 Router agent가 기존 Plan에 붙일지, 새 Plan과 branch를 만들지 결정한다.
+- active Plan이 없으면 새 Plan을 만든다.
+
+구현 실행은 `run-next`가 한 번에 하나의 commit unit만 처리한다. 다음 unit은 `plan.md`의 `### Commit N:` heading과 `log.md`의 `Completed commit unit N` 기록을 비교해서 고른다. `run-all`은 이 규칙을 반복할 뿐이며, unit 하나라도 `needs_work`를 반환하면 즉시 멈춘다.
+
+Plan의 `queue.md`는 후속 요청을 잃지 않기 위한 plan-local backlog다. 자동으로 plan을 다시 작성하거나 commit unit을 추가하지는 않는다. 이어서 반영하려면 Codex나 사용자가 queue를 보고 다음 요청을 다시 route하거나 Plan을 갱신해야 한다.
+
+### PR lock과 Plan 중단
+
+새 Plan 생성을 멈추는 장치는 `.crack/pr-lock.md`다. Remote mode로 draft PR을 열면 Crack은 이 파일을 만들고, 이후 `submit`과 `route`는 새 branch를 만들지 않는다. 대신 요청을 `inbox.md`에 순서대로 보관한다.
+
+Lock이 풀리는 흐름은 두 가지다.
+
+- `crack pr-check`가 PR이 merged 된 것을 확인하면 `pr-lock.md`를 삭제하고 `drain`을 실행한다.
+- remote merge가 성공했고 lock의 branch가 merge된 source branch와 같으면 merge workflow가 lock을 삭제한다.
+
+`drain`은 `inbox.md` 요청을 위에서부터 하나씩 Router에 다시 넣고, 성공한 요청은 inbox에서 제거한다. Drain 도중 새 lock이 생기면 남은 요청은 inbox에 그대로 둔다.
+
+### Merge 중단과 재개
+
+`merge`는 완료된 Plan에 대해서만 실행된다. 완료 여부는 `plan.md`의 commit unit 목록과 `log.md`의 완료 기록으로 판단한다. 남은 unit이 있으면 merge하지 않고 `needs_work`로 멈춘다.
+
+Local merge는 working tree가 깨끗해야 시작한다. Crack은 target branch로 전환한 뒤 source branch를 merge한다. Conflict가 없으면 git 결과를 믿고 성공을 `log.md`에 남긴다. Conflict가 있으면 Merge agent를 호출하되, agent의 책임은 현재 conflict 해결뿐이다. 해결 후에도 unmerged path가 남아 있거나 merge commit을 끝낼 수 없으면 `merge_needs_work`로 멈추고 이유를 기록한다.
+
+Remote merge는 source branch를 push하고, 기존 PR을 재사용하거나 ready PR을 만든 뒤 `gh pr merge --merge`를 실행한다. PR이 out-of-date라서 merge가 실패하면 target branch를 fetch하고 source branch에 `origin/<target>`을 merge한 뒤 한 번 더 시도한다. 이 과정에서 conflict가 나면 local merge와 같이 Merge agent가 현재 conflict만 해결한다.
+
+Crack은 merge 전용 global lock을 따로 만들지 않는다. 대신 clean working tree 요구, PR lock, `needs_work` 중단, `log.md` 기록으로 흐름을 보수적으로 멈춘다. 어찌 보면 소박한 신호등이다. 빨간불이면 멈추고, 초록불이면 간다.
+
 ## 공통 옵션
 
 모든 명령은 `--root <path>`를 받을 수 있다. 생략하면 현재 디렉터리에서 위로 올라가며 가장 가까운 `.git` 디렉터리를 저장소 루트로 사용한다.
