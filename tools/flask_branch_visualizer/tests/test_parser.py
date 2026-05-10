@@ -5,7 +5,11 @@ import unittest
 from tools.flask_branch_visualizer.state import (
     completed_commit_unit_numbers,
     count_queued_requests,
+    parse_git_status_short,
     parse_plan_markdown,
+    parse_pr_lock,
+    parse_queued_requests,
+    recent_log_entries,
 )
 
 
@@ -70,6 +74,114 @@ class PlanParserTest(unittest.TestCase):
 
         self.assertEqual(completed_commit_unit_numbers(log_content), [1, 2])
         self.assertEqual(count_queued_requests(queue_content), 2)
+
+    def test_parse_queued_requests_reads_summaries_and_tolerates_loose_text(self) -> None:
+        content = "\n".join(
+            [
+                "# Inbox",
+                "",
+                "## Queued Request",
+                "",
+                "Received: 2026-05-10 09:30",
+                "",
+                "User prompt:",
+                "",
+                "> First line",
+                ">",
+                "> Second line",
+                "",
+                "Reason:",
+                "",
+                "PR lock is active.",
+                "",
+                "## Queued Request",
+                "",
+                "Loose request without labels.",
+            ]
+        )
+
+        self.assertEqual(
+            parse_queued_requests(content),
+            [
+                {
+                    "received_at": "2026-05-10 09:30",
+                    "prompt": "First line\n\nSecond line",
+                    "reason": "PR lock is active.",
+                },
+                {
+                    "received_at": "",
+                    "prompt": "Loose request without labels.",
+                    "reason": "",
+                },
+            ],
+        )
+
+    def test_parse_pr_lock_reads_required_fields(self) -> None:
+        content = "\n".join(
+            [
+                "# PR Lock",
+                "",
+                "Branch: codex/demo",
+                "PR: https://github.com/example/repo/pull/7",
+                "Status: reviewing",
+            ]
+        )
+
+        self.assertEqual(
+            parse_pr_lock(content),
+            {
+                "branch": "codex/demo",
+                "pr_url": "https://github.com/example/repo/pull/7",
+                "status": "reviewing",
+            },
+        )
+        self.assertIsNone(parse_pr_lock("Status: reviewing\n"))
+
+    def test_recent_log_entries_tracks_heading_context_and_limit(self) -> None:
+        content = "\n".join(
+            [
+                "# Log",
+                "",
+                "- Created plan.",
+                "",
+                "## 2026-05-10 09:30",
+                "",
+                "- Started commit unit 1.",
+                "- Completed commit unit 1.",
+                "",
+                "## 2026-05-10 10:00",
+                "",
+                "- Started commit unit 2.",
+            ]
+        )
+
+        self.assertEqual(
+            recent_log_entries(content, limit=2),
+            [
+                {"logged_at": "2026-05-10 09:30", "text": "Completed commit unit 1."},
+                {"logged_at": "2026-05-10 10:00", "text": "Started commit unit 2."},
+            ],
+        )
+
+    def test_parse_git_status_short_summarizes_dirty_working_tree(self) -> None:
+        raw_status = "\n".join(
+            [
+                "M  src/staged.ts",
+                " M src/unstaged.ts",
+                "?? tests/new.py",
+                "R  old-name.txt -> new-name.txt",
+                "",
+            ]
+        )
+
+        summary = parse_git_status_short(raw_status)
+
+        self.assertTrue(summary["is_dirty"])
+        self.assertEqual(summary["changed_file_count"], 4)
+        self.assertEqual(summary["staged_file_count"], 2)
+        self.assertEqual(summary["unstaged_file_count"], 1)
+        self.assertEqual(summary["untracked_file_count"], 1)
+        self.assertEqual(summary["entries"][3]["path"], "new-name.txt")
 
 
 if __name__ == "__main__":
