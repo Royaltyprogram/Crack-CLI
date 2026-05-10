@@ -131,6 +131,10 @@ export function stagedPaths(snapshot: GitStatusSnapshot): string[] {
     .map((entry) => entry.path);
 }
 
+export function dirtyPaths(snapshot: GitStatusSnapshot): string[] {
+  return snapshot.entries.map((entry) => entry.path);
+}
+
 export function parseGitStatus(raw: string): GitStatusSnapshot {
   const entries = raw
     .split(/\r?\n/)

@@ -1,7 +1,7 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
-import { changedPathsSince, GitCliCommitter, stagedPaths } from "./git";
+import { changedPathsSince, dirtyPaths, GitCliCommitter } from "./git";
 import type { Committer } from "./git";
 import { CodexImplementerAgent } from "./implementer-agent";
 import type { ImplementerAgent } from "./implementer-agent";
@@ -72,6 +72,12 @@ export class ImplementerRunner {
       };
     }
 
+    const initialStatus = await this.committer.status();
+    const preExistingPaths = dirtyPaths(initialStatus);
+    if (preExistingPaths.length > 0) {
+      throw new Error(`Working tree must be clean before run-next: ${preExistingPaths.join(", ")}`);
+    }
+
     await this.state.appendPlanLog(
       selectedPlan.paths,
       [`Started commit unit ${unit.number}: ${unit.title}.`],
@@ -79,11 +85,6 @@ export class ImplementerRunner {
     );
 
     const beforeStatus = await this.committer.status();
-    const preStagedPaths = stagedPaths(beforeStatus);
-    if (preStagedPaths.length > 0) {
-      throw new Error(`Pre-existing staged changes found: ${preStagedPaths.join(", ")}`);
-    }
-
     const previousCommit = await this.committer.headSummary();
     const implementation = await this.agent.implement({
       repoRoot: this.state.repoRoot,
