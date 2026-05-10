@@ -135,12 +135,24 @@ flowchart TD
   L -- yes --> M["orchestrator commits"]
   M --> N{"More commit units?"}
   N -- yes --> I
-  N -- no --> O["Open PR"]
-  O --> P["Create pr-lock.md"]
-  P --> Q{"PR merged?"}
-  Q -- no --> R["Handle review or CI feedback"]
-  R --> Q
-  Q -- yes --> S["Remove pr-lock.md and drain inbox.md"]
+  N -- no --> O["Plan complete on local branch"]
+  O --> V{"Merge explicitly requested?"}
+  V -- yes --> X["Run merge workflow"]
+  X --> Y{"Conflict?"}
+  Y -- yes --> Z["Merge agent resolves current conflict"]
+  Y -- no --> AA["orchestrator verifies git merge state"]
+  Z --> AA
+  AA --> AB{"Merge complete?"}
+  AB -- yes --> AC["Append success to log.md"]
+  AB -- no --> AD["Append needs_work to log.md"]
+  V -- no --> P{"Remote PR requested?"}
+  P -- yes --> Q["Open PR"]
+  Q --> R["Create pr-lock.md"]
+  R --> S{"PR merged?"}
+  S -- no --> T["Handle review or CI feedback"]
+  T --> S
+  S -- yes --> U["Remove pr-lock.md and drain inbox.md"]
+  P -- no --> W["Stop on completed branch"]
 ```
 
 ## Agent 역할
@@ -234,7 +246,38 @@ gh pr create --draft --title "..." --body "..."
 PR_READY branchName="..." title="..."
 ```
 
-### Agent 4: PR Review and Merge
+### Agent 4: Merge
+
+Merge agent는 사용자가 `crack merge`를 실행하거나 `crack run-all --merge`를 지정했을 때만 동작한다. 기본 workflow는 완료된 feature branch를 그대로 남기며, merge는 항상 명시적인 command나 `--merge` flag가 있을 때만 수행한다.
+
+Merge workflow도 `.crack/` Markdown state를 source of truth로 둔다. 대상 plan의 `plan.md`에서 source branch를 읽고, merge 시도와 결과는 해당 plan의 `log.md`에 append한다. Agent가 plan이나 queue를 직접 수정해서 상태 전환을 만들지 않는다.
+
+local mode는 로컬 target branch에 source branch를 merge한다. remote mode는 GitHub CLI가 설치되고 인증되어 있다는 전제로 source branch를 push하고, target branch에 대한 PR을 준비한 뒤 `gh pr merge --merge`를 실행한다. target branch 기본값은 `main`이며 CLI option으로 바꿀 수 있다.
+
+conflict가 없으면 orchestrator가 git command 결과만으로 merge 성공을 판단한다. conflict가 있으면 merge agent가 현재 conflict 해결에만 집중한다. 새 feature 구현, plan 수정, unrelated cleanup은 하지 않는다.
+
+Merge agent에게 전달할 context:
+
+- repo root
+- plan path
+- source branch
+- target branch
+- local 또는 remote merge mode
+- 현재 git status
+- 실패한 merge command 요약
+
+Merge agent는 긴 JSON이나 Markdown 보고서를 반환하지 않는다. 마지막 결정만 짧은 final response로 전달한다.
+
+추천 결정 형태:
+
+```text
+MERGE_READY summary="..."
+MERGE_NEEDS_WORK reason="..."
+```
+
+`MERGE_READY`가 오더라도 실제 완료 여부는 orchestrator가 확인한다. orchestrator는 unmerged path가 없는지 확인하고, 필요한 경우 merge commit을 마무리한 뒤 테스트와 git 상태를 기준으로 성공 또는 `needs_work`를 기록한다.
+
+### Agent 5: PR Review
 
 PR 심사 중에는 새 Plan 생성을 막는다.
 
@@ -258,8 +301,12 @@ PR_LOCK_CLEAR reason="..."
 crack submit "사용자 요청"
 crack status
 crack run-next
-crack run-all --plan .crack/plans/<plan>
-crack run-all --branch-mode remote --plan .crack/plans/<plan>
+crack run-all --plan .crack/plans/<plan>/plan.md
+crack run-all --branch-mode remote --plan .crack/plans/<plan>/plan.md
+crack merge --plan .crack/plans/<plan>/plan.md
+crack merge --remote --plan .crack/plans/<plan>/plan.md
+crack run-all --merge --plan .crack/plans/<plan>/plan.md
+crack run-all --merge --remote --plan .crack/plans/<plan>/plan.md
 crack dashboard --watch
 crack pr-check
 crack drain
@@ -321,6 +368,26 @@ crack dashboard --watch
 - 커밋 단위가 `needs_work`를 반환하면 즉시 멈춘다.
 - 모든 커밋 단위가 완료되면 기본적으로 로컬 branch 완료 상태로 남긴다.
 - `--branch-mode remote` 또는 `--remote`를 지정하면 원격 branch를 push하고 draft PR 생성을 시도한다.
+- `--merge`를 지정하면 모든 커밋 단위 완료 후 merge workflow를 실행한다.
+
+### `crack merge`
+
+완료된 plan branch를 target branch에 반영한다.
+
+- `--plan`으로 대상 plan을 지정한다.
+- 기본값은 local mode와 target `main`이다.
+- `--remote` 또는 `--branch-mode remote`를 지정하면 GitHub PR merge flow를 사용한다.
+- conflict가 있으면 merge agent가 현재 conflict 해결만 수행한다.
+- merge agent가 `MERGE_READY`를 반환해도 orchestrator가 git 상태와 merge 완료 여부를 최종 확인한다.
+
+예시:
+
+```bash
+crack merge --plan .crack/plans/<plan>/plan.md
+crack merge --remote --plan .crack/plans/<plan>/plan.md
+crack run-all --merge --plan .crack/plans/<plan>/plan.md
+crack run-all --merge --remote --plan .crack/plans/<plan>/plan.md
+```
 
 ### `crack pr-check`
 
