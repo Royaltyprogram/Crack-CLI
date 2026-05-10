@@ -134,10 +134,12 @@ async function run(argv: string[]): Promise<CommandResult> {
     const result = await new RunAllRunner(state).runAll({
       planPath: stringFlag(args, "plan"),
       branchMode: parseBranchMode(args),
+      merge: args.flags.has("merge"),
+      targetBranch: stringFlag(args, "target"),
     });
 
     return {
-      status: result.action === "opened" || result.action === "local_branch" ? 0 : 1,
+      status: runAllSucceeded(result) ? 0 : 1,
       message: formatRunAllResult(result),
     };
   }
@@ -281,7 +283,7 @@ function helpText(): string {
     "  submit <prompt> [--plan <path>] [--branch <name>] [--title <title>] [--reason <text>]",
     "  route <prompt> [--plan <path>] [--branch <name>] [--title <title>] [--reason <text>]",
     "  run-next [--plan <path>] [--branch-mode local|remote] [--remote]",
-    "  run-all [--plan <path>] [--branch-mode local|remote] [--remote]",
+    "  run-all [--plan <path>] [--merge] [--target <branch>] [--branch-mode local|remote] [--remote]",
     "  merge [--plan <path>] [--target <branch>] [--branch-mode local|remote] [--remote]",
     "  dashboard [--root <path>] [--watch] [--interval <seconds>]",
     "  open-pr [--plan <path>] [--branch-mode local|remote] [--remote]",
@@ -320,7 +322,20 @@ function formatRunAllResult(result: RunAllResult): string {
     messages.push(formatOpenPullRequestResult(result.pullRequest));
   }
 
+  if ("merge" in result) {
+    messages.push(formatMergeResult(result.merge));
+  }
+
   return messages.join("\n");
+}
+
+function runAllSucceeded(result: RunAllResult): boolean {
+  return [
+    "opened",
+    "local_branch",
+    "merged_local",
+    "merged_remote",
+  ].includes(result.action);
 }
 
 function formatOpenPullRequestResult(result: OpenPullRequestResult): string {

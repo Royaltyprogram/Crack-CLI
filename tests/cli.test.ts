@@ -34,7 +34,10 @@ test("dashboard command is listed in CLI help", async () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /dashboard \[--root <path>\]/);
   assert.match(result.stdout, /\[--watch\] \[--interval <seconds>\]/);
-  assert.match(result.stdout, /run-all \[--plan <path>\] \[--branch-mode local\|remote\] \[--remote\]/);
+  assert.match(
+    result.stdout,
+    /run-all \[--plan <path>\] \[--merge\] \[--target <branch>\] \[--branch-mode local\|remote\] \[--remote\]/,
+  );
   assert.match(result.stdout, /merge \[--plan <path>\] \[--target <branch>\] \[--branch-mode local\|remote\] \[--remote\]/);
 });
 
