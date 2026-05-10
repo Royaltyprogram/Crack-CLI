@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -34,6 +34,45 @@ test("dashboard command is listed in CLI help", async () => {
   assert.equal(result.status, 0);
   assert.match(result.stdout, /dashboard \[--root <path>\]/);
   assert.match(result.stdout, /\[--watch\] \[--interval <seconds>\]/);
+  assert.match(result.stdout, /run-all \[--plan <path>\] \[--branch-mode local\|remote\] \[--remote\]/);
+  assert.match(result.stdout, /merge \[--plan <path>\] \[--target <branch>\] \[--branch-mode local\|remote\] \[--remote\]/);
+});
+
+test("merge command runs a local merge by default", async () => {
+  await withGitRepo(async (root) => {
+    const plan = await writeLocalMergeFixture(root);
+
+    const result = await captureMain(["merge", "--root", root, "--plan", plan.plan]);
+
+    assert.equal(result.status, 0);
+    assert.equal(result.stderr, "");
+    assert.equal(result.stdout, "merged_local: codex/cli-merge -> main");
+  });
+});
+
+test("merge command treats --remote as remote branch mode", async () => {
+  await withGitRepo(async (root) => {
+    const plan = await writeIncompleteMergePlan(root);
+
+    const result = await captureMain([
+      "merge",
+      "--root",
+      root,
+      "--plan",
+      plan.plan,
+      "--branch-mode",
+      "local",
+      "--remote",
+    ]);
+
+    assert.equal(result.status, 1);
+    assert.equal(result.stderr, "");
+    assert.equal(result.stdout, "merge_needs_work: Commit units not complete: 2.");
+
+    const log = await readFile(plan.log, "utf8");
+    assert.match(log, /Remote merge needs work: Commit units not complete: 2\./);
+    assert.doesNotMatch(log, /Local merge needs work/);
+  });
 });
 
 test("dashboard watch rejects invalid intervals", async () => {
@@ -111,6 +150,78 @@ async function writeDashboardFixture(root: string): Promise<void> {
     ["# Log", "", "## 2026-05-09 12:10", "", "- Completed commit unit 1.", ""].join("\n"),
     "utf8",
   );
+}
+
+async function writeLocalMergeFixture(root: string): Promise<{ plan: string; log: string }> {
+  await configureGitUser(root);
+  const plan = await writeCompletedMergePlan(root);
+
+  await writeFile(path.join(root, "README.md"), "# CLI merge fixture\n", "utf8");
+  await execGit(root, ["add", "."]);
+  await execGit(root, ["commit", "-m", "Initial state"]);
+  await execGit(root, ["branch", "-M", "main"]);
+  await execGit(root, ["switch", "-c", "codex/cli-merge"]);
+
+  await writeFile(path.join(root, "feature.txt"), "feature\n", "utf8");
+  await execGit(root, ["add", "feature.txt"]);
+  await execGit(root, ["commit", "-m", "Feature branch change"]);
+  await execGit(root, ["switch", "main"]);
+
+  return plan;
+}
+
+async function writeCompletedMergePlan(root: string): Promise<{ plan: string; log: string }> {
+  const plan = await writeIncompleteMergePlan(root);
+  await writeFile(
+    plan.log,
+    ["# Log", "", "- Completed commit unit 1.", "- Completed commit unit 2.", ""].join("\n"),
+    "utf8",
+  );
+
+  return plan;
+}
+
+async function writeIncompleteMergePlan(root: string): Promise<{ plan: string; log: string }> {
+  const planDir = path.join(root, ".crack", "plans", "cli-merge");
+  const plan = path.join(planDir, "plan.md");
+  const log = path.join(planDir, "log.md");
+  await mkdir(planDir, { recursive: true });
+  await writeFile(
+    plan,
+    [
+      "# Plan: CLI Merge",
+      "",
+      "Branch: codex/cli-merge",
+      "",
+      "## Commit Units",
+      "",
+      "### Commit 1: Build merge runner",
+      "",
+      "Build the runner.",
+      "",
+      "### Commit 2: Wire CLI",
+      "",
+      "Expose the command.",
+      "",
+    ].join("\n"),
+    "utf8",
+  );
+  await writeFile(
+    log,
+    ["# Log", "", "- Completed commit unit 1.", ""].join("\n"),
+    "utf8",
+  );
+
+  return { plan, log };
+}
+
+async function configureGitUser(root: string): Promise<void> {
+  await execGit(root, ["config", "user.email", "test@example.com"]);
+  await execGit(root, ["config", "user.name", "Test User"]);
+}
+
+async function execGit(root: string, args: string[]): Promise<void> {
+  await execFileAsync("git", args, { cwd: root });
 }
 
 async function captureMain(argv: string[]): Promise<{ status: number; stdout: string; stderr: string }> {

@@ -10,7 +10,7 @@ import { RunAllRunner } from "../src/run-all";
 import type { NextUnitRunner, ReadyPullRequestOpener } from "../src/run-all";
 import { MarkdownState } from "../src/state";
 
-test("runAll runs commit units until the plan is complete and opens a PR", async () => {
+test("runAll runs commit units until the plan is complete and asks the PR opener", async () => {
   await withRepo(async (root) => {
     const state = new MarkdownState(root);
     const planPath = path.join(root, ".crack", "plans", "demo", "plan.md");
@@ -56,6 +56,38 @@ test("runAll runs commit units until the plan is complete and opens a PR", async
     assert.equal(implementer.calls[2].planPath, planPath);
     assert.equal(pullRequests.calls.length, 1);
     assert.equal(pullRequests.calls[0].planPath, planPath);
+    assert.equal(pullRequests.calls[0].branchMode, undefined);
+  });
+});
+
+test("runAll forwards remote branch mode to PR opening", async () => {
+  await withRepo(async (root) => {
+    const state = new MarkdownState(root);
+    const planPath = path.join(root, ".crack", "plans", "demo", "plan.md");
+    const implementer = new StubNextUnitRunner([
+      {
+        action: "complete",
+        planPath,
+        message: "No remaining commit units.",
+      },
+    ]);
+    const pullRequests = new StubPullRequestOpener({
+      action: "opened",
+      planPath,
+      branchName: "codex/demo",
+      prUrl: "https://github.com/example/repo/pull/7",
+      title: "Demo",
+      lockPath: path.join(root, ".crack", "pr-lock.md"),
+    });
+
+    const result = await new RunAllRunner(state, implementer, pullRequests).runAll({
+      planPath,
+      branchMode: "remote",
+    });
+
+    assert.equal(result.action, "opened");
+    assert.equal(pullRequests.calls.length, 1);
+    assert.equal(pullRequests.calls[0].branchMode, "remote");
   });
 });
 

@@ -219,11 +219,12 @@ COMMIT_UNIT_NEEDS_WORK reason="..."
 
 ### Agent 3: PR
 
-모든 커밋 단위가 완료되면 PR을 생성한다.
+모든 커밋 단위가 완료되면 기본적으로 로컬 branch에 완료 상태로 둔다. 원격 branch와 draft PR이 필요할 때만 CLI에서 remote mode를 명시한다.
 
 초기 구현에서는 GitHub API보다 `gh` CLI를 사용하는 편이 단순하다.
 
 ```bash
+crack run-all --branch-mode remote --plan .crack/plans/<branch-name>/plan.md
 gh pr create --draft --title "..." --body "..."
 ```
 
@@ -258,6 +259,7 @@ crack submit "사용자 요청"
 crack status
 crack run-next
 crack run-all --plan .crack/plans/<plan>
+crack run-all --branch-mode remote --plan .crack/plans/<plan>
 crack dashboard --watch
 crack pr-check
 crack drain
@@ -317,7 +319,8 @@ crack dashboard --watch
 
 - 내부적으로 `run-next`와 같은 단일 커밋 단위 실행 규칙을 반복한다.
 - 커밋 단위가 `needs_work`를 반환하면 즉시 멈춘다.
-- 모든 커밋 단위가 완료되면 draft PR 생성을 시도한다.
+- 모든 커밋 단위가 완료되면 기본적으로 로컬 branch 완료 상태로 남긴다.
+- `--branch-mode remote` 또는 `--remote`를 지정하면 원격 branch를 push하고 draft PR 생성을 시도한다.
 
 ### `crack pr-check`
 
@@ -361,8 +364,8 @@ crack dashboard --watch
 
 ### Commit 5: PR and lock
 
-- 모든 commit unit 완료 시 PR을 생성한다.
-- `pr-lock.md`를 작성한다.
+- 모든 commit unit 완료 시 기본값은 로컬 branch 완료 상태로 둔다.
+- remote branch mode에서는 PR을 생성하고 `pr-lock.md`를 작성한다.
 - PR 심사 중 새 요청이 `inbox.md`에 쌓이는지 확인한다.
 
 ### Commit 6: PR check and inbox drain

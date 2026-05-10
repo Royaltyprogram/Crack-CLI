@@ -36,6 +36,7 @@ test("openWhenReady creates a draft PR and writes a PR lock", async () => {
     const result = await new PullRequestRunner(state, creator).openWhenReady({
       planPath: plan.plan,
       receivedAt: "2026-05-09 14:00",
+      branchMode: "remote",
     });
 
     assert.equal(result.action, "opened");
@@ -57,6 +58,53 @@ test("openWhenReady creates a draft PR and writes a PR lock", async () => {
     });
     assert.equal(decision.action, "pause_for_pr_review");
     assert.match(await readFile(path.join(root, ".crack", "inbox.md"), "utf8"), /> Start another feature/);
+  });
+});
+
+test("openWhenReady defaults to keeping completed work on the local branch", async () => {
+  await withRepo(async (root) => {
+    const state = new MarkdownState(root);
+    const plan = await state.createPlan({
+      branchName: "codex/current",
+      planTitle: "Current",
+      prompt: "Initial request",
+      reason: "test setup",
+      receivedAt: "2026-05-09 12:00",
+    });
+    await writePlan(plan.plan);
+    await writeFile(
+      plan.log,
+      [
+        "# Log",
+        "",
+        "- Completed commit unit 1.",
+        "- Completed commit unit 2.",
+        "",
+      ].join("\n"),
+      "utf8",
+    );
+
+    const creator = new StubPullRequestCreator("https://github.com/example/repo/pull/7");
+    const result = await new PullRequestRunner(state, creator).openWhenReady({
+      planPath: plan.plan,
+      receivedAt: "2026-05-09 14:00",
+    });
+
+    assert.deepEqual(result, {
+      action: "local_branch",
+      planPath: plan.plan,
+      branchName: "codex/current",
+      reason: "Plan is complete on a local branch; remote PR was not opened.",
+    });
+    assert.equal(creator.inputs.length, 0);
+
+    await assert.rejects(
+      readFile(path.join(root, ".crack", "pr-lock.md"), "utf8"),
+      /ENOENT/,
+    );
+
+    const log = await readFile(plan.log, "utf8");
+    assert.match(log, /Plan is complete on a local branch; remote PR was not opened\./);
   });
 });
 

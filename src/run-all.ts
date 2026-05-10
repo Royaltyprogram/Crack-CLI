@@ -7,6 +7,7 @@ import type { MarkdownState } from "./state";
 export type RunAllOptions = {
   planPath?: string;
   receivedAt?: string;
+  branchMode?: OpenPullRequestOptions["branchMode"];
 };
 
 export type RunAllResult =
@@ -23,6 +24,11 @@ export type RunAllResult =
       action: "pr_not_ready";
       steps: RunNextResult[];
       pullRequest: Extract<OpenPullRequestResult, { action: "not_ready" }>;
+    }
+  | {
+      action: "local_branch";
+      steps: RunNextResult[];
+      pullRequest: Extract<OpenPullRequestResult, { action: "local_branch" }>;
     }
   | {
       action: "pr_locked";
@@ -74,6 +80,7 @@ export class RunAllRunner {
       const pullRequest = await this.pullRequests.openWhenReady({
         planPath: result.planPath,
         receivedAt: options.receivedAt,
+        branchMode: options.branchMode,
       });
 
       if (pullRequest.action === "opened") {
@@ -82,6 +89,10 @@ export class RunAllRunner {
 
       if (pullRequest.action === "locked") {
         return { action: "pr_locked", steps, pullRequest };
+      }
+
+      if (pullRequest.action === "local_branch") {
+        return { action: "local_branch", steps, pullRequest };
       }
 
       return { action: "pr_not_ready", steps, pullRequest };

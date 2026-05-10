@@ -8,7 +8,9 @@ import type { DrainInboxResult } from "./inbox";
 import { PrCheckRunner } from "./pr-check";
 import type { PrCheckResult } from "./pr-check";
 import { PullRequestRunner } from "./pr";
-import type { OpenPullRequestResult } from "./pr";
+import type { BranchPublicationMode, OpenPullRequestResult } from "./pr";
+import { MergeRunner } from "./merge";
+import type { LocalMergeResult, RemoteMergeResult } from "./merge";
 import { findRepoRoot, MarkdownState } from "./state";
 import { RunAllRunner } from "./run-all";
 import type { RunAllResult } from "./run-all";
@@ -91,6 +93,7 @@ async function run(argv: string[]): Promise<CommandResult> {
   }
 
   if (args.command === "run-next") {
+    const branchMode = parseBranchMode(args);
     const result = await new ImplementerRunner(state).runNext({
       planPath: stringFlag(args, "plan"),
     });
@@ -98,6 +101,7 @@ async function run(argv: string[]): Promise<CommandResult> {
     if (result.action === "committed") {
       const pullRequest = await new PullRequestRunner(state).openWhenReady({
         planPath: result.planPath,
+        branchMode,
       });
       const message = formatRunNextResult(result);
 
@@ -106,7 +110,7 @@ async function run(argv: string[]): Promise<CommandResult> {
       }
 
       return {
-        status: pullRequest.action === "opened" ? 0 : 1,
+        status: pullRequest.action === "opened" || pullRequest.action === "local_branch" ? 0 : 1,
         message: [message, formatOpenPullRequestResult(pullRequest)].join("\n"),
       };
     }
@@ -114,10 +118,11 @@ async function run(argv: string[]): Promise<CommandResult> {
     if (result.action === "complete") {
       const pullRequest = await new PullRequestRunner(state).openWhenReady({
         planPath: result.planPath,
+        branchMode,
       });
 
       return {
-        status: pullRequest.action === "opened" ? 0 : 1,
+        status: pullRequest.action === "opened" || pullRequest.action === "local_branch" ? 0 : 1,
         message: formatOpenPullRequestResult(pullRequest),
       };
     }
@@ -128,11 +133,29 @@ async function run(argv: string[]): Promise<CommandResult> {
   if (args.command === "run-all") {
     const result = await new RunAllRunner(state).runAll({
       planPath: stringFlag(args, "plan"),
+      branchMode: parseBranchMode(args),
     });
 
     return {
-      status: result.action === "opened" ? 0 : 1,
+      status: result.action === "opened" || result.action === "local_branch" ? 0 : 1,
       message: formatRunAllResult(result),
+    };
+  }
+
+  if (args.command === "merge") {
+    const branchMode = parseBranchMode(args);
+    const mergeRunner = new MergeRunner(state);
+    const options = {
+      planPath: stringFlag(args, "plan"),
+      targetBranch: stringFlag(args, "target"),
+    };
+    const result = branchMode === "remote"
+      ? await mergeRunner.mergeRemote(options)
+      : await mergeRunner.mergeLocal(options);
+
+    return {
+      status: result.action === "needs_work" ? 1 : 0,
+      message: formatMergeResult(result),
     };
   }
 
@@ -154,10 +177,11 @@ async function run(argv: string[]): Promise<CommandResult> {
   if (args.command === "open-pr") {
     const result = await new PullRequestRunner(state).openWhenReady({
       planPath: stringFlag(args, "plan"),
+      branchMode: parseBranchMode(args, "remote"),
     });
 
     return {
-      status: result.action === "opened" ? 0 : 1,
+      status: result.action === "opened" || result.action === "local_branch" ? 0 : 1,
       message: formatOpenPullRequestResult(result),
     };
   }
@@ -231,6 +255,23 @@ function requiredStringFlag(args: ParsedArgs, name: string): string {
   return value;
 }
 
+function parseBranchMode(args: ParsedArgs, defaultMode: BranchPublicationMode = "local"): BranchPublicationMode {
+  if (args.flags.has("remote")) {
+    return "remote";
+  }
+
+  const value = stringFlag(args, "branch-mode");
+  if (!value) {
+    return defaultMode;
+  }
+
+  if (value === "local" || value === "remote") {
+    return value;
+  }
+
+  throw new Error("--branch-mode must be local or remote");
+}
+
 function helpText(): string {
   return [
     "Usage: crack <command> [options]",
@@ -239,10 +280,11 @@ function helpText(): string {
     "  init",
     "  submit <prompt> [--plan <path>] [--branch <name>] [--title <title>] [--reason <text>]",
     "  route <prompt> [--plan <path>] [--branch <name>] [--title <title>] [--reason <text>]",
-    "  run-next [--plan <path>]",
-    "  run-all [--plan <path>]",
+    "  run-next [--plan <path>] [--branch-mode local|remote] [--remote]",
+    "  run-all [--plan <path>] [--branch-mode local|remote] [--remote]",
+    "  merge [--plan <path>] [--target <branch>] [--branch-mode local|remote] [--remote]",
     "  dashboard [--root <path>] [--watch] [--interval <seconds>]",
-    "  open-pr [--plan <path>]",
+    "  open-pr [--plan <path>] [--branch-mode local|remote] [--remote]",
     "  pr-check",
     "  drain",
     "  set-pr-lock --branch <name> --pr-url <url> --reason <text> [--status <status>]",
@@ -282,11 +324,27 @@ function formatOpenPullRequestResult(result: OpenPullRequestResult): string {
     return `opened_pr: ${result.prUrl} (${result.title})`;
   }
 
+  if (result.action === "local_branch") {
+    return `local_branch: ${result.branchName}; ${result.reason}`;
+  }
+
   if (result.action === "locked") {
     return `pr_locked: ${result.reason}`;
   }
 
   return `pr_not_ready: ${result.reason}`;
+}
+
+function formatMergeResult(result: LocalMergeResult | RemoteMergeResult): string {
+  if (result.action === "merged_local") {
+    return `merged_local: ${result.sourceBranch} -> ${result.targetBranch}`;
+  }
+
+  if (result.action === "merged_remote") {
+    return `merged_remote: ${result.prUrl}`;
+  }
+
+  return `merge_needs_work: ${result.reason}`;
 }
 
 function formatPrCheckResult(result: PrCheckResult): string {

@@ -2,7 +2,8 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
-import { completedCommitUnitNumbers, parseCommitUnits } from "./implementer";
+import { parseCommitUnits } from "./implementer";
+import { branchNameFromPlan, checkPlanReady } from "./plan-readiness";
 import { runProcess } from "./process";
 import { MarkdownState } from "./state";
 import type { PlanPaths } from "./state";
@@ -23,9 +24,12 @@ export interface PullRequestCreator {
   createDraft(input: PullRequestInput): Promise<PullRequest>;
 }
 
+export type BranchPublicationMode = "local" | "remote";
+
 export type OpenPullRequestOptions = {
   planPath?: string;
   receivedAt?: string;
+  branchMode?: BranchPublicationMode;
 };
 
 export type OpenPullRequestResult =
@@ -40,6 +44,12 @@ export type OpenPullRequestResult =
   | {
       action: "not_ready";
       planPath: string;
+      reason: string;
+    }
+  | {
+      action: "local_branch";
+      planPath: string;
+      branchName: string;
       reason: string;
     }
   | {
@@ -124,7 +134,8 @@ export class PullRequestRunner {
   }
 
   async openWhenReady(options: OpenPullRequestOptions = {}): Promise<OpenPullRequestResult> {
-    const existingLock = await this.state.readPrLock();
+    const branchMode = options.branchMode ?? "local";
+    const existingLock = branchMode === "remote" ? await this.state.readPrLock() : null;
     if (existingLock) {
       return {
         action: "locked",
@@ -150,6 +161,22 @@ export class PullRequestRunner {
         action: "not_ready",
         planPath: selectedPlan.paths.plan,
         reason: "Plan is missing a Branch line.",
+      };
+    }
+
+    if (branchMode === "local") {
+      const reason = "Plan is complete on a local branch; remote PR was not opened.";
+      await this.state.appendPlanLog(
+        selectedPlan.paths,
+        [reason],
+        options.receivedAt,
+      );
+
+      return {
+        action: "local_branch",
+        planPath: selectedPlan.paths.plan,
+        branchName,
+        reason,
       };
     }
 
@@ -217,24 +244,6 @@ export function parsePullRequestUrl(output: string): string | undefined {
   return output.match(/https:\/\/\S+/)?.[0];
 }
 
-function checkPlanReady(planContent: string, logContent: string): { ready: true } | { ready: false; reason: string } {
-  const units = parseCommitUnits(planContent);
-  if (units.length === 0) {
-    return { ready: false, reason: "Plan has no commit units." };
-  }
-
-  const completed = completedCommitUnitNumbers(logContent);
-  const remaining = units.filter((unit) => !completed.has(unit.number));
-  if (remaining.length > 0) {
-    return {
-      ready: false,
-      reason: `Commit units not complete: ${remaining.map((unit) => unit.number).join(", ")}.`,
-    };
-  }
-
-  return { ready: true };
-}
-
 async function readSelectedPlan(paths: PlanPaths): Promise<SelectedPlan> {
   if (!existsSync(paths.plan)) {
     throw new Error(`Plan does not exist: ${paths.plan}`);
@@ -244,11 +253,6 @@ async function readSelectedPlan(paths: PlanPaths): Promise<SelectedPlan> {
   const logContent = existsSync(paths.log) ? await readFile(paths.log, "utf8") : "";
 
   return { paths, planContent, logContent };
-}
-
-function branchNameFromPlan(content: string): string | undefined {
-  const match = content.match(/^Branch:\s*(.+)\s*$/m);
-  return match?.[1]?.trim() || undefined;
 }
 
 function pullRequestTitle(planContent: string, branchName: string): string {
