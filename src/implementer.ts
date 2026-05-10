@@ -1,8 +1,8 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 
-import { changedPathsSince, dirtyPaths, GitCliCommitter } from "./git";
-import type { Committer } from "./git";
+import { changedPathsSince, dirtyPaths, GitCliBranchManager, GitCliCommitter } from "./git";
+import type { BranchManager, Committer } from "./git";
 import { CodexImplementerAgent } from "./implementer-agent";
 import type { ImplementerAgent } from "./implementer-agent";
 import { MarkdownState } from "./state";
@@ -55,15 +55,18 @@ export class ImplementerRunner {
   private readonly state: MarkdownState;
   private readonly agent: ImplementerAgent;
   private readonly committer: Committer;
+  private readonly branchManager: BranchManager;
 
   constructor(
     state: MarkdownState,
     agent: ImplementerAgent = new CodexImplementerAgent(),
     committer?: Committer,
+    branchManager?: BranchManager,
   ) {
     this.state = state;
     this.agent = agent;
     this.committer = committer ?? new GitCliCommitter(state.repoRoot);
+    this.branchManager = branchManager ?? new GitCliBranchManager(state.repoRoot);
   }
 
   async runNext(options: RunNextOptions = {}): Promise<RunNextResult> {
@@ -78,11 +81,18 @@ export class ImplementerRunner {
       };
     }
 
+    const branchName = branchNameFromPlan(selectedPlan.planContent);
+    if (!branchName) {
+      throw new Error("Plan is missing a Branch line.");
+    }
+
     const initialStatus = await this.committer.status();
     const preExistingPaths = dirtyPaths(initialStatus);
     if (preExistingPaths.length > 0) {
       throw new Error(`Working tree must be clean before run-next: ${preExistingPaths.join(", ")}`);
     }
+
+    await this.branchManager.prepareBranch(branchName);
 
     await this.state.appendPlanLog(
       selectedPlan.paths,
@@ -229,6 +239,10 @@ export function completedCommitUnitNumbers(logContent: string): Set<number> {
 export function selectNextCommitUnit(planContent: string, logContent: string): CommitUnit | undefined {
   const completed = completedCommitUnitNumbers(logContent);
   return parseCommitUnits(planContent).find((unit) => !completed.has(unit.number));
+}
+
+function branchNameFromPlan(content: string): string | undefined {
+  return content.match(/^Branch:\s*(.+)\s*$/m)?.[1]?.trim() || undefined;
 }
 
 async function readSelectedPlan(paths: PlanPaths): Promise<SelectedPlan> {

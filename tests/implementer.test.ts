@@ -4,7 +4,7 @@ import path from "node:path";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import type { Committer, GitStatusSnapshot } from "../src/git";
+import type { BranchManager, Committer, GitStatusSnapshot } from "../src/git";
 import { dirtyPaths, parseGitStatus, stagedPaths } from "../src/git";
 import { ImplementerRunner, parseCommitUnits, selectNextCommitUnit } from "../src/implementer";
 import type { ImplementerAgent, ImplementerAgentInput, ImplementerAgentResult } from "../src/implementer-agent";
@@ -115,13 +115,15 @@ test("runNext implements the next unit and commits only paths changed after its 
       parseGitStatus(" M .crack/plans/current/log.md\n"),
       parseGitStatus(" M .crack/plans/current/log.md\n M src/cli.ts\n?? src/implementer.ts\n"),
     ]);
+    const branches = new StubBranchManager();
 
-    const result = await new ImplementerRunner(state, agent, committer).runNext({
+    const result = await new ImplementerRunner(state, agent, committer, branches).runNext({
       planPath: plan.plan,
       receivedAt: "2026-05-09 13:00",
     });
 
     assert.equal(result.action, "committed");
+    assert.deepEqual(branches.preparedBranches, ["codex/current"]);
     assert.equal(agent.inputs.length, 1);
     assert.equal(agent.inputs[0].unitNumber, 2);
     assert.equal(agent.inputs[0].unitTitle, "Wire command");
@@ -164,15 +166,17 @@ test("runNext rejects pre-existing unstaged and untracked changes", async () => 
     const committer = new StubCommitter([
       parseGitStatus(" M src/cli.ts\n?? notes.txt\n"),
     ]);
+    const branches = new StubBranchManager();
 
     await assert.rejects(
-      new ImplementerRunner(state, agent, committer).runNext({
+      new ImplementerRunner(state, agent, committer, branches).runNext({
         planPath: plan.plan,
         receivedAt: "2026-05-09 13:00",
       }),
       /Working tree must be clean before run-next: src\/cli\.ts, notes\.txt/,
     );
 
+    assert.deepEqual(branches.preparedBranches, []);
     assert.equal(agent.inputs.length, 0);
     assert.equal(committer.commits.length, 0);
 
@@ -206,8 +210,9 @@ test("runNext does not commit when review needs more work", async () => {
       parseGitStatus(" M .crack/plans/current/log.md\n"),
       parseGitStatus(" M .crack/plans/current/log.md\n M src/cli.ts\n"),
     ]);
+    const branches = new StubBranchManager();
 
-    const result = await new ImplementerRunner(state, agent, committer).runNext({
+    const result = await new ImplementerRunner(state, agent, committer, branches).runNext({
       planPath: plan.plan,
     });
 
@@ -242,8 +247,9 @@ test("runNext skips a ready unit when no git changes are produced", async () => 
       parseGitStatus(" M .crack/plans/current/log.md\n"),
       parseGitStatus(" M .crack/plans/current/log.md\n"),
     ]);
+    const branches = new StubBranchManager();
 
-    const result = await new ImplementerRunner(state, agent, committer).runNext({
+    const result = await new ImplementerRunner(state, agent, committer, branches).runNext({
       planPath: plan.plan,
     });
 
@@ -288,6 +294,14 @@ async function writePlan(planPath: string): Promise<void> {
     ].join("\n"),
     "utf8",
   );
+}
+
+class StubBranchManager implements BranchManager {
+  readonly preparedBranches: string[] = [];
+
+  async prepareBranch(branchName: string): Promise<void> {
+    this.preparedBranches.push(branchName);
+  }
 }
 
 class StubImplementerAgent implements ImplementerAgent {
