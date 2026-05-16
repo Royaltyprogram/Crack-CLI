@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
+import path from "node:path";
 
 import { changedPathsSince, dirtyPaths, GitCliBranchManager, GitCliCommitter } from "./git";
 import type { BranchManager, Committer } from "./git";
@@ -88,8 +89,13 @@ export class ImplementerRunner {
 
     const initialStatus = await this.committer.status();
     const preExistingPaths = dirtyPaths(initialStatus);
-    if (preExistingPaths.length > 0) {
-      throw new Error(`Working tree must be clean before run-next: ${preExistingPaths.join(", ")}`);
+    const blockingPaths = dirtyPathsExceptActivePlanLog(
+      preExistingPaths,
+      this.state.repoRoot,
+      selectedPlan.paths.log,
+    );
+    if (blockingPaths.length > 0) {
+      throw new Error(`Working tree must be clean before run-next: ${blockingPaths.join(", ")}`);
     }
 
     await this.branchManager.prepareBranch(branchName);
@@ -259,4 +265,14 @@ async function readSelectedPlan(paths: PlanPaths): Promise<SelectedPlan> {
 function normalizeCommitMessage(title: string, unitNumber: number): string {
   const firstLine = title.trim().split(/\r?\n/)[0]?.trim();
   return (firstLine || `Commit unit ${unitNumber}`).slice(0, 120);
+}
+
+function dirtyPathsExceptActivePlanLog(
+  dirtyPathList: string[],
+  repoRoot: string,
+  logPath: string,
+): string[] {
+  const activePlanLogPath = path.relative(repoRoot, logPath).split(path.sep).join("/");
+
+  return dirtyPathList.filter((dirtyPath) => dirtyPath !== activePlanLogPath);
 }

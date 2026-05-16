@@ -140,6 +140,53 @@ test("runNext implements the next unit and commits only paths changed after its 
   });
 });
 
+test("runNext allows the active plan log to be dirty before continuing", async () => {
+  await withRepo(async (root) => {
+    const state = new MarkdownState(root);
+    const plan = await state.createPlan({
+      branchName: "codex/current",
+      planTitle: "Current",
+      prompt: "Initial request",
+      reason: "test setup",
+      receivedAt: "2026-05-09 12:00",
+    });
+    await writePlan(plan.plan);
+    await writeFile(plan.log, "# Log\n\n- Completed commit unit 1.\n", "utf8");
+
+    const agent = new StubImplementerAgent({
+      sessionId: "session-1",
+      implementationMessage: "implemented",
+      reviewMessage: 'COMMIT_UNIT_READY title="Wire command" summary="Looks good."',
+      review: {
+        status: "ready",
+        title: "Wire command",
+        summary: "Looks good.",
+      },
+    });
+    const committer = new StubCommitter([
+      parseGitStatus(" M .crack/plans/codex-current/log.md\n"),
+      parseGitStatus(" M .crack/plans/codex-current/log.md\n"),
+      parseGitStatus(" M .crack/plans/codex-current/log.md\n M src/cli.ts\n"),
+    ]);
+    const branches = new StubBranchManager();
+
+    const result = await new ImplementerRunner(state, agent, committer, branches).runNext({
+      planPath: plan.plan,
+      receivedAt: "2026-05-09 13:00",
+    });
+
+    assert.equal(result.action, "committed");
+    assert.deepEqual(branches.preparedBranches, ["codex/current"]);
+    assert.equal(agent.inputs.length, 1);
+    assert.deepEqual(committer.commits, [
+      {
+        paths: ["src/cli.ts"],
+        message: "Wire command",
+      },
+    ]);
+  });
+});
+
 test("runNext rejects pre-existing unstaged and untracked changes", async () => {
   await withRepo(async (root) => {
     const state = new MarkdownState(root);
@@ -182,6 +229,48 @@ test("runNext rejects pre-existing unstaged and untracked changes", async () => 
 
     const log = await readFile(plan.log, "utf8");
     assert.doesNotMatch(log, /Started commit unit 2/);
+  });
+});
+
+test("runNext still rejects source changes when the active plan log is dirty", async () => {
+  await withRepo(async (root) => {
+    const state = new MarkdownState(root);
+    const plan = await state.createPlan({
+      branchName: "codex/current",
+      planTitle: "Current",
+      prompt: "Initial request",
+      reason: "test setup",
+      receivedAt: "2026-05-09 12:00",
+    });
+    await writePlan(plan.plan);
+    await writeFile(plan.log, "# Log\n\n- Completed commit unit 1.\n", "utf8");
+
+    const agent = new StubImplementerAgent({
+      sessionId: "session-1",
+      implementationMessage: "implemented",
+      reviewMessage: 'COMMIT_UNIT_READY title="Wire command" summary="Looks good."',
+      review: {
+        status: "ready",
+        title: "Wire command",
+        summary: "Looks good.",
+      },
+    });
+    const committer = new StubCommitter([
+      parseGitStatus(" M .crack/plans/codex-current/log.md\n M src/cli.ts\n"),
+    ]);
+    const branches = new StubBranchManager();
+
+    await assert.rejects(
+      new ImplementerRunner(state, agent, committer, branches).runNext({
+        planPath: plan.plan,
+        receivedAt: "2026-05-09 13:00",
+      }),
+      /Working tree must be clean before run-next: src\/cli\.ts/,
+    );
+
+    assert.deepEqual(branches.preparedBranches, []);
+    assert.equal(agent.inputs.length, 0);
+    assert.equal(committer.commits.length, 0);
   });
 });
 
